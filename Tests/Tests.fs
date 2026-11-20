@@ -397,3 +397,44 @@ module zip3 =
     let [<Fact>] ``Custom struct: ValueOption``() = [31 .. 40] |> List.map ValueSome |> check
     let [<Fact>] ``Custom class: Option``() = [31 .. 40] |> List.map Some |> check
     let [<Fact>] ``Custom class: Tuple``() = [31 .. 40] |> List.mapi (fun i x -> x, i) |> check
+
+module emptyAndMaximumRegression =
+    let [<Fact>] ``Zero-length axes preserve rank and enumerate no elements``() =
+        let source = Array2D.zeroCreate<int> 2 0
+        let typed = ArrayND.ofArray2D source
+        let untyped = ArrayND.ofArrayNonGeneric<int> source
+        for array in [typed; untyped] do
+            Assert.Equal(TensorShape [|2; 0|], array.Tensor.Shape)
+            Assert.Empty(array :> seq<int>)
+            Assert.Empty(array :> System.Collections.IEnumerable)
+
+    let [<Fact>] ``Maximum skips a leading NaN and retains NaN for all-NaN input``() =
+        Assert.Equal(7., ArrayND.max (ArrayND.ofList [nan; 7.; 2.; nan]))
+        Assert.True(Double.IsNaN(ArrayND.max (ArrayND.ofList [nan; nan])))
+        Assert.Equal(7.f, ArrayND.max (ArrayND.ofList [Single.NaN; 7.f]))
+        Assert.True(Single.IsNaN(ArrayND.max (ArrayND.empty<float32>)))
+
+    let [<Fact>] ``Axis maximum leaves input dimensions and values unchanged``() =
+        let array = ArrayND.ofArray2D (array2D [[nan; nan]; [4.; nan]])
+        let result = ArrayND.maxd 1 array
+        Assert.Equal(TensorShape [|2|], result.Tensor.Shape)
+        Assert.Equal(4., result.Tensor.data[1])
+        Assert.True(Double.IsNaN(result.Tensor.data[0]))
+        Assert.Equal(TensorShape [|2; 2|], array.Tensor.Shape)
+        Assert.Equal(4., array.Tensor.data[2])
+        Assert.True(Double.IsNaN(array.Tensor.data[0]))
+
+    let [<Fact>] ``Axis maximum preserves other empty dimensions``() =
+        let array = ArrayND.ofArray3D (Array3D.zeroCreate<int> 2 0 3)
+        let emptyAxis = ArrayND.maxd 1 array
+        let remainingEmpty = ArrayND.maxd 0 array
+        Assert.Equal(TensorShape [|2; 3|], emptyAxis.Tensor.Shape)
+        Assert.All(emptyAxis, fun value -> Assert.Equal(0, value))
+        Assert.Equal(TensorShape [|0; 3|], remainingEmpty.Tensor.Shape)
+        Assert.Empty(remainingEmpty :> seq<int>)
+
+    let [<Fact>] ``Axis maximum rejects dimensions outside the rank``() =
+        let array = ArrayND.ofList [1; 2]
+        for dimension in [-1; 1] do
+            let error = Assert.Throws<ArgumentException>(fun () -> ArrayND.maxd dimension array |> ignore)
+            Assert.Equal("dimension", error.ParamName)

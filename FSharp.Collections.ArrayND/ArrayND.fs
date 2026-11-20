@@ -118,8 +118,11 @@ module ArrayNDHelpers =
 open ArrayNDHelpers
 type ArrayND<'T> = { Tensor: Tensor<'T> } with
     override this.ToString() = this.Tensor.ToString()
-    interface System.Collections.IEnumerable with member this.GetEnumerator() = (this.Tensor.Iterate() |> Seq.map (fun struct(_, x) -> x)).GetEnumerator()
-    interface seq<'T> with member this.GetEnumerator() = (this.Tensor.Iterate() |> Seq.map (fun struct(_, x) -> x)).GetEnumerator()
+    member private this.Elements =
+        if this.Tensor.Volume = 0 then Seq.empty
+        else this.Tensor.Iterate() |> Seq.map (fun struct(_, x) -> x)
+    interface System.Collections.IEnumerable with member this.GetEnumerator() = this.Elements.GetEnumerator()
+    interface seq<'T> with member this.GetEnumerator() = this.Elements.GetEnumerator()
 type MaskedArrayND<'T> = ArrayND<'T voption>
 module ArrayND =
     // Functions that interface with GenericTensor
@@ -216,29 +219,58 @@ module ArrayND =
             state <- s
             ret.SetValueNoCheck(r, index)
         { Tensor = ret }, state
-    let max (arraynd: 'T ArrayND): 'T = arraynd |> Seq.max
+    let private maxOrDefault (values: 'T seq): 'T =
+        let isNaN (value: 'T) =
+            if typeof<'T> = typeof<float> then System.Double.IsNaN(unbox<float> (box value))
+            elif typeof<'T> = typeof<float32> then System.Single.IsNaN(unbox<float32> (box value))
+            else false
+        let mutable best = ValueNone
+        for value in values do
+            if not (isNaN value) then
+                match best with
+                | ValueSome current when compare value current <= 0 -> ()
+                | _ -> best <- ValueSome value
+        match best with
+        | ValueSome value -> value
+        | ValueNone when typeof<'T> = typeof<float> -> unbox<'T> (box System.Double.NaN)
+        | ValueNone when typeof<'T> = typeof<float32> -> unbox<'T> (box System.Single.NaN)
+        | ValueNone -> Unchecked.defaultof<'T>
+
+    let max (arraynd: 'T ArrayND): 'T = maxOrDefault arraynd
     let maxBy (projection: 'T -> 'U) (arraynd: 'T ArrayND): 'T = arraynd |> Seq.maxBy projection
     let maxd (dimension: int) (arraynd: 'T ArrayND): 'T ArrayND =
-        for i in dimension .. -1 .. 1 do arraynd.Tensor.Transpose(i, i-1)
-        let buffer = Array.zeroCreate arraynd.Tensor.Shape.Length
-        let ret = { Tensor =
-            Tensor.CreateTensor(Array.tail arraynd.Tensor.Shape.shape |> TensorShape, fun j ->
-                Seq.max (seq {
-                    j.CopyTo(buffer, 1)
-                    for i in 0 .. arraynd.Tensor.Shape[0] - 1 do
-                        buffer[0] <- i
-                        arraynd.Tensor.GetValueNoCheck buffer
-                }))
-        }
-        for i in 1 .. dimension do arraynd.Tensor.Transpose(i, i-1)
-        ret
+        let shape = arraynd.Tensor.Shape.shape
+        if dimension < 0 || dimension >= shape.Length then
+            invalidArg (nameof dimension) "Dimension is outside the array rank."
+        // GenericTensor cannot represent rank zero. Keep a vector of length one.
+        let reducedShape =
+            if shape.Length = 1 then [|1|]
+            else Array.append shape[..dimension - 1] shape[dimension + 1..]
+        let resultShape = TensorShape reducedShape
+        if Array.contains 0 reducedShape then { Tensor = Tensor resultShape }
+        else
+            let index = Array.zeroCreate shape.Length
+            { Tensor = Tensor.CreateTensor(resultShape, fun outputIndex ->
+                if shape.Length > 1 then
+                    System.Array.Copy(outputIndex, 0, index, 0, dimension)
+                    System.Array.Copy(outputIndex, dimension, index, dimension + 1, shape.Length - dimension - 1)
+                maxOrDefault (seq {
+                    for i in 0 .. shape[dimension] - 1 do
+                        index[dimension] <- i
+                        yield arraynd.Tensor.GetValueNoCheck index
+                })) }
     let min (arraynd: 'T ArrayND): 'T = arraynd |> Seq.min
     let minBy (projection: 'T -> 'U) (arraynd: 'T ArrayND): 'T = arraynd |> Seq.minBy projection
     let ofArray (array: 'T array): 'T ArrayND = { Tensor = Tensor.CreateVector array }
-    let ofArray2D (array: 'T[,]): 'T ArrayND = { Tensor = Tensor.CreateMatrix array }
+    let private emptyArrayTensor<'T> (array: System.Array): 'T Tensor =
+        Tensor (TensorShape (Array.init array.Rank array.GetLength))
+    let ofArray2D (array: 'T[,]): 'T ArrayND =
+        { Tensor = if array.Length = 0 then emptyArrayTensor array else Tensor.CreateMatrix array }
     let ofArray3D (array: 'T[,,]): 'T ArrayND = { Tensor = Tensor.CreateTensor array }
-    let ofArray4D (array: 'T[,,,]): 'T ArrayND = { Tensor = Tensor.CreateTensor array }
-    let ofArrayNonGeneric<'T> (array: System.Array): 'T ArrayND = { Tensor = Tensor.CreateTensor array }
+    let ofArray4D (array: 'T[,,,]): 'T ArrayND =
+        { Tensor = if array.Length = 0 then emptyArrayTensor array else Tensor.CreateTensor array }
+    let ofArrayNonGeneric<'T> (array: System.Array): 'T ArrayND =
+        { Tensor = if array.Length = 0 then emptyArrayTensor array else Tensor.CreateTensor array }
     let ofList (list: 'T list): 'T ArrayND = { Tensor = Tensor.CreateTensor (list |> Array.ofList) }
     let ofSeq (source: 'T seq): 'T ArrayND = { Tensor = Tensor.CreateTensor (source |> Array.ofSeq) }
     let reduce (reduction: 'T -> 'T -> 'T) (arraynd: 'T ArrayND): 'T = Seq.reduce reduction arraynd
