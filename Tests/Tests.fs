@@ -43,12 +43,12 @@ module fold =
     let [<Fact>] ``Custom class: Tuple``() = [(1, 2); (2, 3); (3, 4)] |> check (fun a (x, _) -> a + x) 2
 module indexed =
     let check (list: 'T list) =
-        assertArrayEq (List.indexed list |> List.map (fun (i, x) -> [|i|], x) |> ArrayND.ofList) (ArrayND.indexed (ArrayND.ofList list))
-        assertArrayEq (List.indexed list |> List.map (fun (i, x) -> [|i|], x) |> ArrayND.ofList) (ArrayND.indexed (ArrayND.ofArray (Array.ofList list)))
+        assertArrayEq (List.indexed list |> List.map (fun (i, x) -> struct ([|i|], x)) |> ArrayND.ofList) (ArrayND.indexed (ArrayND.ofList list))
+        assertArrayEq (List.indexed list |> List.map (fun (i, x) -> struct ([|i|], x)) |> ArrayND.ofList) (ArrayND.indexed (ArrayND.ofArray (Array.ofList list)))
         let twoD = array2D [list; List.rev list]
-        assertArrayEq (Array2D.mapi (fun i j x -> [|i; j|], x) twoD |> ArrayND.ofArray2D) (ArrayND.indexed (ArrayND.ofArray2D twoD))
+        assertArrayEq (Array2D.mapi (fun i j x -> struct ([|i; j|], x)) twoD |> ArrayND.ofArray2D) (ArrayND.indexed (ArrayND.ofArray2D twoD))
         let threeD = Array3D.init list.Length list.Length 1 (fun _ j _ -> list[j])
-        assertArrayEq (Array3D.mapi (fun i j k x -> [|i; j; k|], x) threeD |> ArrayND.ofArray3D) (ArrayND.indexed (ArrayND.ofArray3D threeD))
+        assertArrayEq (Array3D.mapi (fun i j k x -> struct ([|i; j; k|], x)) threeD |> ArrayND.ofArray3D) (ArrayND.indexed (ArrayND.ofArray3D threeD))
     let [<Fact>] ``Built-in: Int32``() = [1 .. 10] |> check
     let [<Fact>] ``Built-in: String``() = [1 .. 10] |> List.map string |> check
     let [<Fact>] ``Custom struct: Char``() = [1 .. 10] |> List.map char |> check
@@ -348,11 +348,11 @@ module sum =
     let [<Fact>] ``Sums to int32: Char`` () = check char
 module tryExactlyOne =
     let check (list: 'T list) =
-        Assert.Equal(List.tryExactlyOne list, list |> ArrayND.ofList |> ArrayND.tryExactlyOne)
+        Assert.Equal<'T voption>(List.tryExactlyOne list |> ValueOption.ofOption, list |> ArrayND.ofList |> ArrayND.tryExactlyOne)
         let list = [yield! list; yield! list]
-        Assert.Equal(List.tryExactlyOne list, list |> ArrayND.ofList |> ArrayND.tryExactlyOne)
+        Assert.Equal<'T voption>(List.tryExactlyOne list |> ValueOption.ofOption, list |> ArrayND.ofList |> ArrayND.tryExactlyOne)
         let list = [if false then yield! list]
-        Assert.Equal(List.tryExactlyOne list, list |> ArrayND.ofList |> ArrayND.tryExactlyOne)
+        Assert.Equal<'T voption>(List.tryExactlyOne list |> ValueOption.ofOption, list |> ArrayND.ofList |> ArrayND.tryExactlyOne)
     let [<Fact>] ``Built-in: Int32``() = [1] |> check
     let [<Fact>] ``Built-in: String``() = [2] |> List.map string |> check
     let [<Fact>] ``Custom struct: Char``() = [3] |> List.map char |> check
@@ -362,14 +362,14 @@ module tryExactlyOne =
 module zip =
     let other = [1 .. 10]
     let check (list: 'T list) =
-        assertArrayEq (List.zip list other |> ArrayND.ofList) (ArrayND.zip (ArrayND.ofList list) (ArrayND.ofList other))
-        assertArrayEq (List.zip list other |> ArrayND.ofList) (ArrayND.zip (ArrayND.ofArray (Array.ofList list)) (ArrayND.ofList other))
+        assertArrayEq (List.map2 (fun x y -> struct (x, y)) list other |> ArrayND.ofList) (ArrayND.zip (ArrayND.ofList list) (ArrayND.ofList other))
+        assertArrayEq (List.map2 (fun x y -> struct (x, y)) list other |> ArrayND.ofList) (ArrayND.zip (ArrayND.ofArray (Array.ofList list)) (ArrayND.ofList other))
         // test broadcasting
         let twoD = array2D [list; List.rev list]
-        let resultTwoD = Array2D.init 2 list.Length (fun i j -> twoD[i, j], other[j])
+        let resultTwoD = Array2D.init 2 list.Length (fun i j -> struct (twoD[i, j], other[j]))
         assertArrayEq (resultTwoD |> ArrayND.ofArray2D) (ArrayND.zip (ArrayND.ofArray2D twoD) (ArrayND.ofList other))
         let threeD = Array3D.init list.Length list.Length 1 (fun _ j _ -> list[j])
-        let resultThreeD = Array3D.init list.Length list.Length list.Length (fun _ j k -> list[j], other[k])
+        let resultThreeD = Array3D.init list.Length list.Length list.Length (fun _ j k -> struct (list[j], other[k]))
         assertArrayEq (resultThreeD |> ArrayND.ofArray3D) (ArrayND.zip (ArrayND.ofArray3D threeD) (ArrayND.ofList other))
     let [<Fact>] ``Built-in: Int32``() = [31 .. 40] |> check
     let [<Fact>] ``Built-in: String``() = [31 .. 40] |> List.map string |> check
@@ -382,14 +382,14 @@ module zip3 =
     let other21D = [for i in 10 .. -1 .. 1 do char i]
     let other2 = array2D [for c in other21D do [c]]
     let check (list: 'T list) =
-        assertArrayEq (List.zip3 list other other21D |> ArrayND.ofList) (ArrayND.zip3 (ArrayND.ofList list) (ArrayND.ofList other) (ArrayND.ofSeq other21D))
-        assertArrayEq (List.zip3 list other other21D |> ArrayND.ofList) (ArrayND.zip3 (ArrayND.ofArray (Array.ofList list)) (ArrayND.ofList other) (ArrayND.ofList other21D))
+        assertArrayEq (List.map3 (fun x y z -> struct (x, y, z)) list other other21D |> ArrayND.ofList) (ArrayND.zip3 (ArrayND.ofList list) (ArrayND.ofList other) (ArrayND.ofSeq other21D))
+        assertArrayEq (List.map3 (fun x y z -> struct (x, y, z)) list other other21D |> ArrayND.ofList) (ArrayND.zip3 (ArrayND.ofArray (Array.ofList list)) (ArrayND.ofList other) (ArrayND.ofList other21D))
         // test broadcasting
         let twoD = array2D [for _ in 1 .. 2 .. 10 do list; List.rev list]
-        let resultTwoD = Array2D.init 10 list.Length (fun i j -> twoD[i, j], other[j], other2[i, 0])
+        let resultTwoD = Array2D.init 10 list.Length (fun i j -> struct (twoD[i, j], other[j], other2[i, 0]))
         assertArrayEq (resultTwoD |> ArrayND.ofArray2D) (ArrayND.zip3 (ArrayND.ofArray2D twoD) (ArrayND.ofList other) (ArrayND.ofArray2D other2))
         let threeD = Array3D.init list.Length list.Length 1 (fun _ j _ -> list[j])
-        let resultThreeD = Array3D.init list.Length list.Length list.Length (fun _ j k -> list[j], other[k], other2[j, 0])
+        let resultThreeD = Array3D.init list.Length list.Length list.Length (fun _ j k -> struct (list[j], other[k], other2[j, 0]))
         assertArrayEq (resultThreeD |> ArrayND.ofArray3D) (ArrayND.zip3 (ArrayND.ofArray3D threeD) (ArrayND.ofList other) (ArrayND.ofArray2D other2))
     let [<Fact>] ``Built-in: Int32``() = [31 .. 40] |> check
     let [<Fact>] ``Built-in: String``() = [31 .. 40] |> List.map string |> check
